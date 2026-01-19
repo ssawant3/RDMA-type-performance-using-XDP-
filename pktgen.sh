@@ -4,7 +4,7 @@
 INTERFACE="enp0s1"
 DEST_IP="192.168.64.4"
 DEST_MAC="5A:5B:AA:E3:4A:AB" 
-PKT_SIZE="64"                            
+PKT_SIZE="512"                            
 COUNT="0"                 # 0 = Infinite (Use Ctrl+C to stop)
 
 # UDP PORT SETTINGS (Both locked to 5201)
