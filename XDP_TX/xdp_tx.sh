@@ -40,8 +40,8 @@ echo "XDP Program loaded successfully."
 
 # --- 3. GET MAP IDs ---
 # We use bpftool to find the ID of the maps we just loaded
-PROTO_MAP_ID=$(sudo bpftool map show | grep block_proto_map | awk '{print $1}' | tr -d ':')
-CONFIG_MAP_ID=$(sudo bpftool map show | grep block_config_map | awk '{print $1}' | tr -d ':')
+PROTO_MAP_ID=$( sudo bpftool map show | grep "block_proto_map" | awk -F: '{print $1}')
+CONFIG_MAP_ID=$(sudo bpftool map show | grep "block_config_ma" | awk -F: '{print $1}')
 
 if [ -z "$PROTO_MAP_ID" ] || [ -z "$CONFIG_MAP_ID" ]; then
     echo "Could not find maps. Is bpftool installed? (sudo apt install linux-tools-common linux-tools-generic)"
