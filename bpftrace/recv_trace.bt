@@ -1,50 +1,41 @@
 #!/usr/bin/env bpftrace
 
-/* * TRACING RECEIVER LATENCY (The Upward Path)
- * * Path: [Driver] --> [IP Layer] --> [Socket/App]
+/* * NOTE: Headers removed to fix "BEGIN_trigger" error.
+ * * COLUMNS:
+ * 1. SKB Address (Hex)
+ * 2. DRIVER->IP Latency (us)  [Time to strip Ethernet & Firewall]
+ * 3. IP->SOCKET Latency (us)  [Time to Route & Enqueue]
+ * 4. TOTAL Receiver Latency (us)
  */
 
-BEGIN
-{
-    printf("Tracing Receiver Stack Latency... Hit Ctrl+C to stop.\n");
-    printf("%-18s %-12s %-12s %-12s\n", "SKB_ADDR", "DRV->IP(us)", "IP->SOCK(us)", "TOTAL(us)");
-}
-
-/* * 1. DRIVER LAYER (Start of Kernel Work)
- * The NIC driver hands the packet to the Generic Kernel Stack.
- */
+/* * 1. DRIVER LAYER (Start) */
 tracepoint:net:netif_receive_skb
 {
+    // Store start time when packet leaves driver
     $skb = (uint64)args->skbaddr;
     @rx_start[$skb] = nsecs;
 }
 
-/* * 2. IP LAYER (Routing Decision)
- * The packet has passed firewall checks and routing. 
- * It is now determined to be "Local" (for this machine).
- */
+/* * 2. IP LAYER (Routing) */
 kprobe:ip_local_deliver
 {
-    $skb = (uint64)arg0; // First argument is skb
+    $skb = (uint64)arg0;
     if (@rx_start[$skb]) {
         @rx_ip[$skb] = nsecs;
     }
 }
 
-/* * 3. SOCKET LAYER (End of Kernel Work)
- * The packet is enqueued into the UDP socket.
- * This is effectively "send" but in reverse—it's ready for the app.
- */
+/* * 3. SOCKET LAYER (End) */
 kprobe:udp_queue_rcv_skb
 {
-    $skb = (uint64)arg1; // First arg is sock, second is skb
+    $skb = (uint64)arg1; 
     
     if (@rx_start[$skb]) {
         $start = @rx_start[$skb];
-        $ip_ts = @rx_ip[$skb]; // Retrieve IP layer timestamp
+        $ip_ts = @rx_ip[$skb];
         $now = nsecs;
 
-        // Only calculate if we caught the middle step (IP Layer)
+        // Check if we captured the intermediate IP timestamp
         if ($ip_ts != 0) {
              $lat_drv_ip  = ($ip_ts - $start) / 1000;
              $lat_ip_sock = ($now - $ip_ts)  / 1000;
@@ -54,13 +45,12 @@ kprobe:udp_queue_rcv_skb
                     $skb, $lat_drv_ip, $lat_ip_sock, $total);
         }
 
-        // Cleanup
         delete(@rx_start[$skb]);
         delete(@rx_ip[$skb]);
     }
 }
 
-/* Cleanup to prevent memory leaks */
+/* Cleanup */
 interval:s:5 {
     clear(@rx_start);
     clear(@rx_ip);
