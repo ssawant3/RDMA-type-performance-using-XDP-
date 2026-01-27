@@ -1,0 +1,48 @@
+#!/usr/bin/env bpftrace
+
+/* * Tracks time spent in NET_RX (Receive) and NET_TX (Send) SoftIRQs per CPU.
+ * USAGE: sudo ./softirq_cpu.bt
+ */
+
+BEGIN
+{
+    printf("Tracing SoftIRQ CPU usage... Hit Ctrl-C to end.\n");
+    // Vector 2 is NET_TX, Vector 3 is NET_RX
+}
+
+/* * Triggered when the CPU starts handling a SoftIRQ 
+ */
+tracepoint:irq:softirq_entry
+/args->vec == 3 || args->vec == 2/
+{
+    @start[cpu] = nsecs;
+}
+
+/* * Triggered when the CPU finishes the SoftIRQ 
+ */
+tracepoint:irq:softirq_exit
+/args->vec == 3 || args->vec == 2/
+{
+    $s = @start[cpu];
+    
+    if ($s != 0) {
+        $delta = (nsecs - $s) / 1000; // Duration in microseconds
+        
+        // Accumulate time per CPU and Vector type
+        // vec 3 = RX (Receive), vec 2 = TX (Send)
+        @us_per_cpu_vec[cpu, args->vec] = sum($delta);
+        
+        delete(@start[cpu]);
+    }
+}
+
+/* * Report every 1 second 
+ */
+interval:s:1
+{
+    time("%H:%M:%S ");
+    printf("--- SoftIRQ Usage (microseconds per sec) ---\n");
+    printf("Key: [CPU_ID, VECTOR_ID] (2=TX, 3=RX)\n");
+    print(@us_per_cpu_vec);
+    clear(@us_per_cpu_vec);
+}
