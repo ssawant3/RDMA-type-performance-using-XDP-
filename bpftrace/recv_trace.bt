@@ -1,69 +1,69 @@
 #!/usr/bin/env bpftrace
 
 /* * rx_lat_hist.bt
- * Measures Receiver Latency using Histograms to avoid performance penalties.
- * * OUTPUT:
- * - Driver->IP: Time from driver to routing decision.
- * - IP->Socket: Time from routing to application queue.
- * - Total: Full receive path latency.
- */
+ * Measures Receiver Latency using Histograms.
+ */
 
 /* 1. DRIVER LAYER (Start) */
 tracepoint:net:netif_receive_skb
 {
-    $skb = (uint64)args->skbaddr;
-    @rx_start[$skb] = nsecs;
+    $skb = (uint64)args->skbaddr;
+    @rx_start[$skb] = nsecs;
 }
 
 /* 2. IP LAYER (Routing) */
 kprobe:ip_local_deliver
 {
-    $skb = (uint64)arg0;
-    if (@rx_start[$skb]) {
-        @rx_ip[$skb] = nsecs;
-    }
+    $skb = (uint64)arg0;
+    if (@rx_start[$skb]) {
+        @rx_ip[$skb] = nsecs;
+    }
 }
 
-/* 3. SOCKET LAYER (End) */
-kprobe:udp_queue_rcv_skb
+/* 3. SOCKET LAYER (End) - Changed to handle TCP & UDP */
+kprobe:sock_queue_rcv_skb
 {
-    $skb = (uint64)arg1; 
-    
-    if (@rx_start[$skb]) {
-        $start = @rx_start[$skb];
-        $ip_ts = @rx_ip[$skb];
-        $now = nsecs;
+    $skb = (uint64)arg1; 
+    
+    if (@rx_start[$skb]) {
+        $start = @rx_start[$skb];
+        $ip_ts = @rx_ip[$skb];
+        $now = nsecs;
 
-        // Calculate latencies in MICROSECONDS
-        if ($ip_ts != 0) {
-             $drv_ip  = ($ip_ts - $start) / 1000;
-             $ip_sock = ($now - $ip_ts)  / 1000;
-             $total   = ($now - $start)  / 1000;
-             
-             // Store in histograms instead of printing
-             @dist_Driver_to_IP_us = hist($drv_ip);
-             @dist_IP_to_Socket_us = hist($ip_sock);
-             @dist_Total_Latency_us = hist($total);
-        }
+        if ($ip_ts != 0) {
+             $drv_ip  = ($ip_ts - $start) / 1000;
+             $ip_sock = ($now - $ip_ts)  / 1000;
+             $total   = ($now - $start)  / 1000;
+             
+             @dist_Driver_to_IP_us = hist($drv_ip);
+             @dist_IP_to_Socket_us = hist($ip_sock);
+             @dist_Total_Latency_us = hist($total);
+             
+             // Separate map for the average calculation
+             @avg_total_us = avg($total);
+        }
 
-        delete(@rx_start[$skb]);
-        delete(@rx_ip[$skb]);
-    }
+        delete(@rx_start[$skb]);
+        delete(@rx_ip[$skb]);
+    }
 }
 
-/* Print summary every 5 seconds */
 interval:s:5 {
-    time("%H:%M:%S \n");
-    // Print histograms for debugging
-    print(@dist_Driver_to_IP_us);
-    print(@dist_IP_to_Socket_us);
-    print(@dist_Total_Latency_us);
-    
-    // Print averages for parsing
-    printf("DATA_AVG_LATENCY_US: %d\n", avg(@dist_Total_Latency_us));
-    
-    // Clear data for the next batch
-    clear(@dist_Driver_to_IP_us);
-    clear(@dist_IP_to_Socket_us);
-    clear(@dist_Total_Latency_us);
-} 
+    time("%H:%M:%S \n");
+    
+    print(@dist_Driver_to_IP_us);
+    print(@dist_IP_to_Socket_us);
+    print(@dist_Total_Latency_us);
+    
+    // Correct way to print the average
+    print(@avg_total_us);
+    
+    clear(@dist_Driver_to_IP_us);
+    clear(@dist_IP_to_Socket_us);
+    clear(@dist_Total_Latency_us);
+    clear(@avg_total_us);
+
+    /* Anti-leak: Clean up stale entries from dropped packets */
+    clear(@rx_start);
+    clear(@rx_ip);
+}
